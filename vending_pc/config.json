@@ -1,0 +1,28 @@
+{
+  "items": [
+    {
+      "addr": 1,
+      "name": "Игрушка A",
+      "price": 150,
+      "image": "media/toy_a.jpg",
+      "motor_direction": "forward"
+    },
+    {
+      "addr": 2,
+      "name": "Игрушка B",
+      "price": 200,
+      "image": "media/toy_b.jpg",
+      "motor_direction": "reverse"
+    }
+  ],
+  "ports": {
+    "rs485": "COM3",
+    "ccnet": "COM4",
+    "mdb":   "COM5"
+  },
+  "timeouts": {
+    "payment_sec": 30,
+    "dispense_sec": 10,
+    "success_screen_sec": 5
+  }
+}
