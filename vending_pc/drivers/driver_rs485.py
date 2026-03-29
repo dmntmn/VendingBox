@@ -20,9 +20,22 @@ FLAG_BUTTON   = 0x04
 
 
 def _build_packet(addr: int, cmd: int, data: bytes = b"") -> bytes:
-    body = bytes([addr, cmd]) + data
-    crc  = crc16(body)
-    return body + struct.pack("<H", crc)
+    # [ADDR][LEN][CMD][DATA...][CRC16_LO][CRC16_HI]
+    # LEN = 1 (CMD) + len(DATA)
+    payload = bytes([addr, 1 + len(data), cmd]) + data
+    crc = crc16(payload)
+    return payload + struct.pack("<H", crc)
+
+
+async def _read_packet(reader, timeout: float) -> bytes | None:
+    """Читает ровно LEN+4 байт — граница пакета всегда точная."""
+    try:
+        header = await asyncio.wait_for(reader.readexactly(2), timeout)  # ADDR + LEN
+        addr, length = header
+        rest = await asyncio.wait_for(reader.readexactly(length + 2), timeout)  # CMD+DATA + CRC
+        return header + rest
+    except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+        return None
 
 
 def _check_packet(raw: bytes) -> tuple[int, int, bytes] | None:
@@ -31,7 +44,8 @@ def _check_packet(raw: bytes) -> tuple[int, int, bytes] | None:
     body, crc_bytes = raw[:-2], raw[-2:]
     if struct.pack("<H", crc16(body)) != crc_bytes:
         return None
-    return body[0], body[1], body[2:]   # addr, cmd, data
+    # body = [ADDR][LEN][CMD][DATA...]
+    return body[0], body[2], body[3:]   # addr, cmd, data
 
 
 class DriverRS485:
@@ -74,10 +88,7 @@ class DriverRS485:
 
     async def _send(self, pkt: bytes) -> bytes | None:
         self._writer.write(pkt)
-        try:
-            return await asyncio.wait_for(self._reader.read(16), POLL_TIMEOUT)
-        except asyncio.TimeoutError:
-            return None
+        return await _read_packet(self._reader, POLL_TIMEOUT)
 
     # Вызывается из FSM
     async def motor_start(self, addr: int, direction: str):

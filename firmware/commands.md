@@ -2,26 +2,36 @@
 
 ## Протокол
 
-Пакет: `[ADDR][CMD][DATA...][CRC16_LO][CRC16_HI]`
+Пакет: `[ADDR][LEN][CMD][DATA...][CRC16_LO][CRC16_HI]`
 - ADDR: 1–32 (адрес сателлита по DIP-переключателям)
-- CRC16: Modbus CRC
+- LEN: количество байт от CMD до конца DATA включительно (не считая CRC)
+- CRC16: Modbus CRC считается по всем байтам от ADDR до последнего байта DATA
 - Все ответы имеют ту же структуру
+
+**Как приёмник определяет конец пакета:**
+1. Прочитать байт ADDR
+2. Прочитать байт LEN
+3. Прочитать ровно LEN байт (CMD + DATA)
+4. Прочитать 2 байта CRC16
+5. Итого всегда: `LEN + 4` байт — граница пакета известна точно
 
 ---
 
 ## Таблица команд
 
-| CMD  | Название         | Направление     | DATA запроса | DATA ответа              |
-|------|------------------|-----------------|--------------|--------------------------|
-| 0x01 | PING             | PC → MCU → PC   | —            | `[0x01]` (ACK)           |
-| 0x02 | GET_STATUS       | PC → MCU → PC   | —            | `[FLAGS]`                |
-| 0x03 | MOTOR_START      | PC → MCU → PC   | `[DIR]`      | `[0x01]` (ACK)           |
-| 0x04 | MOTOR_STOP       | PC → MCU → PC   | —            | `[0x01]` (ACK)           |
-| 0x05 | DISPENSE_RESULT  | PC → MCU → PC   | —            | `[RESULT]`               |
-| 0x06 | GET_ADDR         | PC → MCU → PC   | —            | `[ADDR]`                 |
-| 0x07 | BUTTON_EVENT     | MCU → PC (push) | —            | `[0x07][ADDR]`           |
-| 0x08 | SET_SENSOR_MODE  | PC → MCU → PC   | `[MODE]`     | `[0x01]` (ACK)           |
-| 0xFF | ERROR            | MCU → PC        | —            | `[ERR_CODE]`             |
+LEN запроса = 1 (только CMD, без DATA) если DATA пустой, иначе 1 + len(DATA).
+
+| CMD  | Название         | Направление     | LEN req | LEN resp | DATA запроса | DATA ответа              |
+|------|------------------|-----------------|---------|----------|--------------|--------------------------|
+| 0x01 | PING             | PC → MCU → PC   | 1       | 2        | —            | `[0x01]` (ACK)           |
+| 0x02 | GET_STATUS       | PC → MCU → PC   | 1       | 2        | —            | `[FLAGS]`                |
+| 0x03 | MOTOR_START      | PC → MCU → PC   | 2       | 2        | `[DIR]`      | `[0x01]` (ACK)           |
+| 0x04 | MOTOR_STOP       | PC → MCU → PC   | 1       | 2        | —            | `[0x01]` (ACK)           |
+| 0x05 | DISPENSE_RESULT  | PC → MCU → PC   | 1       | 2        | —            | `[RESULT]`               |
+| 0x06 | GET_ADDR         | PC → MCU → PC   | 1       | 2        | —            | `[ADDR]`                 |
+| 0x07 | BUTTON_EVENT     | MCU → PC (push) | —       | 2        | —            | `[0x07][ADDR]`           |
+| 0x08 | SET_SENSOR_MODE  | PC → MCU → PC   | 2       | 2        | `[MODE]`     | `[0x01]` (ACK)           |
+| 0xFF | ERROR            | MCU → PC        | —       | 2        | —            | `[ERR_CODE]`             |
 
 ---
 
@@ -173,11 +183,14 @@
 ```
 loop:
     если есть байты в UART RX буфере:
-        собрать пакет до таймаута межбайтового молчания
-        проверить ADDR == my_addr
-        проверить CRC16
-        если ошибка → отправить ERROR
-        иначе → выполнить обработчик команды
+        прочитать байт → ADDR
+        прочитать байт → LEN
+        прочитать LEN байт → buf[]   // CMD + DATA
+        прочитать 2 байта → crc_recv
+        вычислить CRC16(ADDR, LEN, buf[])
+        если crc_recv != crc_calc → отправить ERROR 0x01, continue
+        если ADDR != my_addr → игнорировать, continue
+        выполнить обработчик buf[0] (CMD)
 
     если btn_pending и DE == LOW:
         отправить BUTTON_EVENT
